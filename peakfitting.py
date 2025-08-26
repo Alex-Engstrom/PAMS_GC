@@ -1334,7 +1334,7 @@ if __name__ == "__main__":
     # Load and process chromatogram
     d1 = cc.Day(r"C:\AutoGCData\RB", "20250802")
     
-    for i, c in enumerate(d1.chromatograms[0:2]):
+    for i, c in enumerate(d1.chromatograms[1:2]):
         print(f"Processing chromatogram {i+1}")
         
         chrom_data = c.back.chromatogram
@@ -1349,7 +1349,7 @@ if __name__ == "__main__":
         
         # Manual inspection to see what peaks should be there
         print(f"\n=== MANUAL PEAK INSPECTION ===")
-        manual_regions = manual_peak_inspection(results, min_snr=3.0)
+        manual_regions = manual_peak_inspection(results, min_snr=5.0)
         print(f"Found {len(manual_regions)} potential peak regions manually")
         
         # Use the improved peak finding
@@ -1375,7 +1375,7 @@ if __name__ == "__main__":
             
             # Get all potential peaks for debugging
             all_peak_indices = find_all_significant_peaks(
-                time, signal_smooth, baseline_noise, min_snr=3.0, min_prominence=0.005
+                time, signal_smooth, baseline_noise, min_snr=10.0, min_prominence=0.01
             )
             
             # Plot debug information

@@ -23,7 +23,7 @@ class Chromatogram:
         self.filename = Path(filename)
         self._datetime = None
         self._chromatogram = None
-        self._peakareas = None
+        self._peakamounts = None
         self._loaded = False
         self._error = None
 
@@ -32,7 +32,7 @@ class Chromatogram:
         try:
             self._datetime = self._get_datetime()
             self._chromatogram = self._generate_chrom()
-            self._peakareas = self._generate_areas()
+            self._peakamounts = self._generate_amounts()
             self._loaded = True
             self._error = None
         except Exception as e:
@@ -52,27 +52,27 @@ class Chromatogram:
         return self._chromatogram
 
     @property
-    def peakareas(self):
-        if not self._loaded and self._peakareas is None:
-            self._peakareas = self._generate_areas()
-        return self._peakareas
+    def peakamounts(self):
+        if not self._loaded and self._peakamounts is None:
+            self._peakamounts = self._generate_amounts()
+        return self._peakamounts
 
         
     def _get_datetime(self):
-            """Private method to get datetime"""
-            # Implement your datetime extraction logic here
-            try:
-                with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-                    # Example: get datetime from file metadata
-                    if 'dataset_date_time_stamp' in rootgrp.ncattrs():
-                        date_string = rootgrp.dataset_date_time_stamp
-                        return parser.parse(date_string)
-                    else:
-                        # Fallback: use file modification time
-                        return datetime.fromtimestamp(self.filename.stat().st_mtime)
-            except Exception as e:
-                print(f"Error getting datetime: {e}")
-                return None
+        """Private method to get datetime"""
+        try:
+            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+                # Example: get datetime from file metadata
+                if 'dataset_date_time_stamp' in rootgrp.ncattrs():
+                    date_string = rootgrp.dataset_date_time_stamp
+                    return parser.parse(date_string)
+                else:
+                    # Fallback: use file modification time
+                    return datetime.fromtimestamp(self.filename.stat().st_mtime)
+        except Exception as e:
+            print(f"Error getting datetime: {e}")
+            return None
+
     
     def _generate_chrom(self):
         """Private method to generate chromatogram"""
@@ -93,8 +93,8 @@ class Chromatogram:
             print(f"Error accessing file {self.filename}: {e}")
             return None
 
-    def _generate_areas(self):
-        """Private method to generate peak areas"""
+    def _generate_amounts(self):
+        """Private method to generate peak areas dataframe"""
         try:
             with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
                 if "peak_name" not in rootgrp.variables or "peak_amount" not in rootgrp.variables:
@@ -120,6 +120,12 @@ class Chromatogram:
     def list_netcdf_attributes(self):
         with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
             return rootgrp.ncattrs()
+    def examine_netcdf_variable(self, variable):
+        with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+            return rootgrp.variables[variable][:]
+    def examine_netcdf_attribute(self, attribute):
+        with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+            return getattr(rootgrp, attribute)
 
     def __repr__(self):
         return f"Chromatogram({self.filename.name})"
@@ -264,13 +270,13 @@ if __name__ == "__main__":
     d1 = Day(r"C:\AutoGCData\RB", "20250802")
     print(f"Day folder: {d1}")
     print(f"Chromatograms found: {len(d1.chromatograms)}")
+    print(d1.chromatograms[1].front.list_netcdf_attributes())
+    print(d1.chromatograms[1].front.list_netcdf_variables())
+    print(d1.chromatograms[1].front.examine_netcdf_variable('peak_height'))
     for chrom in d1.chromatograms:
-        if type(chrom) == Sample:
-            print("SAMPLE", chrom.front.datetime, chrom.front.filename,chrom.back.datetime, chrom.back.filename)
-        elif type(chrom) == CVS:
-            print("CVS", chrom.front.filename, chrom.back.filename)
-            print(chrom.front.list_netcdf_variables())
-            print(chrom.front.list_netcdf_attributes())
+        for variable in chrom.front.list_netcdf_variables():
+            print(variable, d1.chromatograms[1].front.examine_netcdf_variable(variable))
+
 
 
 
