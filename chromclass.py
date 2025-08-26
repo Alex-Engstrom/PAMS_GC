@@ -203,8 +203,9 @@ class Day:
             else:
                 print(f"⚠️ Missing front or back file for run {run_key}")
 
-        return result_objects           
-
+        return result_objects
+        
+        
     def __str__(self):
         return f"{self.folder}"
 
@@ -214,8 +215,8 @@ class Day:
 
 #%%
 class PAMSSite:
-    def __init__(self):
-        self.sitename = None
+    def __init__(self, sitename):
+        self.sitename = sitename
 #%%
 class FrontDetectorChromatogram(Chromatogram):
     pass
