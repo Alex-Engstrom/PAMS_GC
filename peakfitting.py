@@ -651,6 +651,7 @@ def enhanced_find_peaks_complete(results, smooth_window=21, smooth_order=3,
                                acquisition_time=0.2, max_reduced_chi_sq=10.0):
     """
     Complete enhanced peak finding with improved edge detection and fitting
+    Returns both the peaks info and all detected indices for debugging
     """
     time = results['corrected_arr'][0]
     signal = results['corrected_arr'][1]
@@ -671,6 +672,8 @@ def enhanced_find_peaks_complete(results, smooth_window=21, smooth_order=3,
     
     # Fit each detected peak
     peaks_info = []
+    successful_fits = 0
+    
     for peak_idx in all_peak_indices:
         peak_idx = int(peak_idx)
         
@@ -692,14 +695,20 @@ def enhanced_find_peaks_complete(results, smooth_window=21, smooth_order=3,
                 gaussian_fit, baseline_noise, acquisition_time
             )
             peaks_info.append(peak_info)
+            successful_fits += 1
+        else:
+            print(f"Peak at {time[peak_idx]:.3f} min failed fitting: "
+                  f"χ²={gaussian_fit['reduced_chi_squared'] if gaussian_fit else 'N/A'}, "
+                  f"SNR={signal_smooth[peak_idx]/baseline_noise:.1f}")
     
     # Remove duplicates and sort
     final_peaks = remove_duplicate_peaks(peaks_info)
     final_peaks.sort(key=lambda x: x['fitted_center'])
     
+    print(f"Successful fits: {successful_fits}/{len(all_peak_indices)}")
     print(f"After filtering: {len(final_peaks)} valid peaks")
     
-    return final_peaks
+    return final_peaks, all_peak_indices
 
 def manual_peak_inspection(results, min_snr=5.0):
     """
@@ -1320,7 +1329,7 @@ def diagnose_peak_fitting(results, peaks_info, specific_peaks=None):
             print(f"  Fit quality: Good ({ratio:.1%} of actual height)")
 
 
-# Update your main processing code to use the corrected plotting functions:
+# Update the main processing to include debugging and manual inspection
 if __name__ == "__main__":
     # Load and process chromatogram
     d1 = cc.Day(r"C:\AutoGCData\RB", "20250802")
@@ -1335,32 +1344,115 @@ if __name__ == "__main__":
         # Perform baseline correction
         results = baseline(chrom_data)
         
-        # First, do manual inspection to see what peaks should be there
-        manual_regions = manual_peak_inspection(results, min_snr=5.0)
+        # Plot baseline results first
+        plot_baseline_results(results, f"Chromatogram {i+1} - Baseline")
+        
+        # Manual inspection to see what peaks should be there
+        print(f"\n=== MANUAL PEAK INSPECTION ===")
+        manual_regions = manual_peak_inspection(results, min_snr=3.0)
+        print(f"Found {len(manual_regions)} potential peak regions manually")
         
         # Use the improved peak finding
-        peaks_info = enhanced_find_peaks_complete(
+        print(f"\n=== AUTOMATED PEAK DETECTION ===")
+        peaks_info, all_peak_indices = enhanced_find_peaks_complete(
             results, 
-            min_snr=3.0,  # Lower threshold to catch more peaks
-            min_prominence=0.005,  # More sensitive prominence
+            min_snr=3.0,
+            min_prominence=0.005,
             acquisition_time=0.2
         )
         
         if peaks_info:
-            print(f"Found {len(peaks_info)} peaks")
+            print(f"Automated detection found {len(peaks_info)} peaks")
+            
+            # Create a modified version that returns all detected indices for debugging
+            # For debugging purposes, let's also get all potential peaks
+            time = results['corrected_arr'][0]
+            signal = results['corrected_arr'][1]
+            baseline_noise = results['baseline_noise']
+            
+            # Smooth the signal
+            signal_smooth = savgol_filter(signal, 21, 3) if len(signal) > 21 else signal
+            
+            # Get all potential peaks for debugging
+            all_peak_indices = find_all_significant_peaks(
+                time, signal_smooth, baseline_noise, min_snr=3.0, min_prominence=0.005
+            )
+            
+            # Plot debug information
+            print(f"\n=== PEAK DETECTION DEBUG ===")
+            plot_peak_detection_debug(results, all_peak_indices, peaks_info)
+            
+            # Compare manual vs automated detection
+            print(f"\n=== COMPARISON: MANUAL vs AUTOMATED ===")
+            manual_centers = []
+            for start, end in manual_regions:
+                if end - start >= 5:  # Only consider substantial regions
+                    region_signal = signal[start:end]
+                    peak_idx = start + np.argmax(region_signal)
+                    manual_centers.append(time[peak_idx])
+            
+            auto_centers = [peak['fitted_center'] for peak in peaks_info]
+            
+            print(f"Manual detection found peaks at: {[f'{x:.3f}' for x in manual_centers]} min")
+            print(f"Automated detection found peaks at: {[f'{x:.3f}' for x in auto_centers]} min")
+            
+            # Check for missed peaks
+            missed_peaks = []
+            for manual_rt in manual_centers:
+                # Check if any automated peak is close to this manual peak
+                closest_match = min(auto_centers, key=lambda x: abs(x - manual_rt)) if auto_centers else None
+                if closest_match is None or abs(closest_match - manual_rt) > 0.05:  # 0.05 min tolerance
+                    missed_peaks.append(manual_rt)
+            
+            if missed_peaks:
+                print(f"WARNING: Potential missed peaks at: {[f'{x:.3f}' for x in missed_peaks]} min")
+            else:
+                print("All manual peaks were detected automatically")
             
             # Run diagnostics on the fitting
+            print(f"\n=== PEAK FITTING DIAGNOSTICS ===")
             diagnose_peak_fitting(results, peaks_info)
             
-            # Plot the results with debugging info
-            # For debugging, we need to modify enhanced_find_peaks_complete to return all_peak_indices
-            # You might need to adjust this based on your actual implementation
-            
+            # Plot the Gaussian fits
+            print(f"\n=== GAUSSIAN FITS ===")
             plot_gaussian_fits(results, peaks_info)
             
+            # Plot comprehensive overview
+            plot_comprehensive_chromatogram(results, peaks_info)
+            
+            # Plot fit quality vs SNR
+            plot_fit_quality_vs_snr(peaks_info)
+            
             # Print detailed information
+            print(f"\n=== DETAILED PEAK INFORMATION ===")
             print_detailed_peak_info(peaks_info)
+            
+            # Summary statistics
+            print(f"\n=== SUMMARY STATISTICS ===")
+            print(f"Total peaks: {len(peaks_info)}")
+            print(f"Retention time range: {min(auto_centers):.2f} - {max(auto_centers):.2f} min")
+            print(f"Largest peak: {max(p['fitted_amplitude_pA'] for p in peaks_info):.2f} pA")
+            print(f"Average SNR: {np.mean([p['signal_to_noise'] for p in peaks_info]):.1f}")
+            print(f"Average reduced χ²: {np.mean([p['reduced_chi_squared'] for p in peaks_info]):.2f}")
+            print(f"Total ion count: {sum(p['gaussian_area_ions'] for p in peaks_info):.0f} ions")
             
         else:
             print("No peaks found in this chromatogram")
-            plot_baseline_results(results, f"Chromatogram {i+1} (No Peaks)")
+            print("This suggests either:")
+            print("1. The signal is very noisy")
+            print("2. The baseline correction failed")
+            print("3. The peak detection parameters are too strict")
+            
+            # Plot the signal to help diagnose
+            plt.figure(figsize=(12, 6))
+            time = results['corrected_arr'][0]
+            signal = results['corrected_arr'][1]
+            plt.plot(time, signal, 'b-', label='Corrected Signal')
+            plt.axhline(y=results['noise_threshold'], color='r', linestyle='--', 
+                       label=f'Noise Threshold ({results["noise_threshold"]:.3f} pA)')
+            plt.xlabel('Retention Time (min)')
+            plt.ylabel('Signal (pA)')
+            plt.title(f'Chromatogram {i+1} - No Peaks Detected')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.show()
