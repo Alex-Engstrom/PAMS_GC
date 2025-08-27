@@ -24,6 +24,8 @@ class Chromatogram:
         self._datetime = None
         self._chromatogram = None
         self._peakamounts = None
+        self._peakwindows = None
+        self._peaklocations = None
         self._loaded = False
         self._error = None
 
@@ -56,6 +58,18 @@ class Chromatogram:
         if not self._loaded and self._peakamounts is None:
             self._peakamounts = self._generate_amounts()
         return self._peakamounts
+    
+    @property
+    def peakwindows(self):
+        if not self._loaded and self._peakwindows is None:
+            self._peakwindows = self._generate_peakwindows()
+        return self._peakwindows
+
+    @property
+    def peaklocations(self):
+        if not self._loaded and self._peaklocations is None:
+            self._peaklocations = self._generate_peaklocations()
+        return self._peaklocations
 
         
     def _get_datetime(self):
@@ -97,13 +111,11 @@ class Chromatogram:
         """Private method to generate peak areas dataframe"""
         try:
             with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-                if "peak_name" not in rootgrp.variables or "peak_amount" not in rootgrp.variables:
-                    return pd.DataFrame(columns=["peak_name", "peak_amount"])
-                
-                peak_names = [
-                    b"".join(np.ma.filled(row, b"")).decode("utf-8").strip()
-                    for row in rootgrp.variables["peak_name"][:]
-                ]
+                required_vars = ["peak_name", "peak_amount"]
+                for var in required_vars:
+                    if var not in rootgrp.variables:
+                        raise KeyError(f"Missing '{var}' in {self.filename}")
+                peak_names =  ncdf.chartostring(rootgrp.variables["peak_name"][:])
 
                 peak_amount = rootgrp.variables["peak_amount"][:]
 
@@ -113,19 +125,52 @@ class Chromatogram:
                 })
         except Exception as e:
             print(f"Error reading peak areas: {e}")
-            return pd.DataFrame(columns=["peak_name", "peak_amount"])
+    def _generate_peakwindows(self):
+        try:
+            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+                required_vars = ["peak_name", "peak_start_time", "peak_end_time", "peak_retention_time"]
+                for var in required_vars:
+                    if var not in rootgrp.variables:
+                        raise KeyError(f"Missing '{var}' in {self.filename}")
+                peak_names =  ncdf.chartostring(rootgrp.variables["peak_name"][:])
+                
+                peak_start_times = rootgrp.variables["peak_start_time"][:]
+                peak_end_times = rootgrp.variables["peak_end_time"][:]
+
+                return pd.DataFrame({
+                    "peak_name": peak_names,
+                    "peak_window_start_time": peak_start_times,
+                    "peak_window_end_time": peak_end_times})
+        except Exception as e:
+            print(f"Error reading peak start or end times: {e}")
+    def _generate_peaklocations(self):
+        try:
+            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+                required_vars = ["peak_name", 'baseline_start_time', 'baseline_stop_time', "peak_retention_time"]
+                for var in required_vars:
+                    if var not in rootgrp.variables:
+                        raise KeyError(f"Missing '{var}' in {self.filename}")
+                data = {var: ncdf.chartostring(rootgrp.variables[var][:]) if var == "peak_name" 
+                        else rootgrp.variables[var][:]
+                        for var in required_vars}
+
+                return pd.DataFrame(data)
+        except Exception as e:
+            print(f"Error reading peak start or end times: {e}")
+    
     def list_netcdf_variables(self):
         with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
             return rootgrp.variables.keys()
     def list_netcdf_attributes(self):
         with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-            return rootgrp.ncattrs()
+            return rootgrp.__dict__
     def examine_netcdf_variable(self, variable):
         with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-            return rootgrp.variables[variable][:]
+            return rootgrp.variables[variable][:], rootgrp.variables[variable].__dict__
     def examine_netcdf_attribute(self, attribute):
         with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
             return getattr(rootgrp, attribute)
+    
 
     def __repr__(self):
         return f"Chromatogram({self.filename.name})"
@@ -193,7 +238,7 @@ class Day:
             "q": RTS,
             "e": LCS,
             "d": DetectionLimit,
-            "m":Calibration
+            "m": Calibration
         }
 
         for run_key, paths in files_by_run.items():
@@ -270,12 +315,28 @@ if __name__ == "__main__":
     d1 = Day(r"C:\AutoGCData\RB", "20250802")
     print(f"Day folder: {d1}")
     print(f"Chromatograms found: {len(d1.chromatograms)}")
-    print(d1.chromatograms[1].front.list_netcdf_attributes())
+    att = d1.chromatograms[1].front.list_netcdf_attributes()
+    attribute_dict = {}
+    for attribute in att:
+        attribute_dict[attribute] = d1.chromatograms[1].front.examine_netcdf_attribute(attribute)
+        
     print(d1.chromatograms[1].front.list_netcdf_variables())
-    print(d1.chromatograms[1].front.examine_netcdf_variable('peak_height'))
-    for chrom in d1.chromatograms:
-        for variable in chrom.front.list_netcdf_variables():
-            print(variable, d1.chromatograms[1].front.examine_netcdf_variable(variable))
+    variables = list(d1.chromatograms[1].front.list_netcdf_variables())
+    variable_values_dict = {}
+    variable_attributes_list = []
+    for variable in variables:
+        variable_values_dict[variable] = d1.chromatograms[1].front.examine_netcdf_variable(variable)[0]
+    peakwindows=[]
+    peakamounts = []
+    peaklocations = []
+    baseline_start = pd.DataFrame()
+    baseline_end = []
+    for i, chrom in enumerate(d1.chromatograms):
+        peaklocations.append(chrom.back.peaklocations)
+        peakwindows.append(chrom.back.peakwindows)
+        peakamounts.append(chrom.back.peakamounts)
+        baseline_end.append([chrom.back.examine_netcdf_variable('baseline_start_time')[0][:],chrom.back.examine_netcdf_variable('baseline_stop_time')[0][:]])
+        
 
 
 
