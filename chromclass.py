@@ -14,10 +14,48 @@ from pathlib import Path
 import re
 from collections import defaultdict
 from dateutil import parser
+import os
+from chemformula import ChemFormula
+import pubchempy as pcp
 
 class Chromatogram:
     """Handles chromatogram data from .cdf files."""
-
+    # bp_voc_list = [ChemFormula('CH3CH2CH2CH2CH2CH3', name = 'n-hexane', cas = 110_54_3),
+    #                ChemFormula('C5H9(CH3)', name = 'methylcyclopentane', cas = 96_37_7),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),
+    #                ChemFormula(),]
     def __init__(self, filename, dataformat="cdf"):
         self.format = dataformat
         self.filename = Path(filename)
@@ -34,7 +72,9 @@ class Chromatogram:
         try:
             self._datetime = self._get_datetime()
             self._chromatogram = self._generate_chrom()
-            self._peakamounts = self._generate_amounts()
+            self._peakamounts = self._generate_class_attributes('peakamounts')
+            self._peakwindows = self._generate_class_attributes('peakwindows')
+            self._peaklocations = self._generate_class_attributes('peaklocations')
             self._loaded = True
             self._error = None
         except Exception as e:
@@ -56,19 +96,19 @@ class Chromatogram:
     @property
     def peakamounts(self):
         if not self._loaded and self._peakamounts is None:
-            self._peakamounts = self._generate_amounts()
+            self._peakamounts = self._generate_class_attributes('peakamounts')
         return self._peakamounts
     
     @property
     def peakwindows(self):
         if not self._loaded and self._peakwindows is None:
-            self._peakwindows = self._generate_peakwindows()
+            self._peakwindows = self._generate_class_attributes('peakwindows')
         return self._peakwindows
 
     @property
     def peaklocations(self):
         if not self._loaded and self._peaklocations is None:
-            self._peaklocations = self._generate_peaklocations()
+            self._peaklocations = self._generate_class_attributes('peaklocations')
         return self._peaklocations
 
         
@@ -86,67 +126,34 @@ class Chromatogram:
         except Exception as e:
             print(f"Error getting datetime: {e}")
             return None
-
-    
+        
     def _generate_chrom(self):
         """Private method to generate chromatogram"""
         try:
             with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-                required_vars = ["ordinate_values", "actual_run_time_length", "actual_delay_time"]
+                required_vars = ["ordinate_values", "actual_run_time_length", "actual_delay_time", 'actual_sampling_interval']
                 for var in required_vars:
                     if var not in rootgrp.variables:
                         raise KeyError(f"Missing '{var}' in {self.filename}")
                 
                 signal = np.array(rootgrp.variables["ordinate_values"][:])
                 runtime = float(rootgrp.variables["actual_run_time_length"][0])
-                starttime = float(rootgrp.variables["actual_delay_time"][:])
-                
-                rt = np.linspace(start=starttime, stop=runtime, num=len(signal))
+                starttime = float(rootgrp.variables["actual_delay_time"][0])
+                interval = float(rootgrp.variables['actual_sampling_interval'][0])
+                rt = np.arange(starttime, runtime, interval)
                 return np.vstack((rt, signal))
         except Exception as e:
             print(f"Error accessing file {self.filename}: {e}")
             return None
-
-    def _generate_amounts(self):
-        """Private method to generate peak areas dataframe"""
+            
+    def _generate_class_attributes(self, attribute: str):
+        """Private method to generate attributes"""
+        attribute_guide = {'peaklocations': ["peak_name", 'baseline_start_time', 'baseline_stop_time', 'baseline_start_value', 'baseline_stop_value', "peak_retention_time"],
+                           'peakamounts': ["peak_name", "peak_amount"],
+                           'peakwindows': ["peak_name", "peak_start_time", "peak_end_time", "peak_retention_time"]}
         try:
             with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-                required_vars = ["peak_name", "peak_amount"]
-                for var in required_vars:
-                    if var not in rootgrp.variables:
-                        raise KeyError(f"Missing '{var}' in {self.filename}")
-                peak_names =  ncdf.chartostring(rootgrp.variables["peak_name"][:])
-
-                peak_amount = rootgrp.variables["peak_amount"][:]
-
-                return pd.DataFrame({
-                    "peak_name": peak_names,
-                    "peak_amount": peak_amount
-                })
-        except Exception as e:
-            print(f"Error reading peak areas: {e}")
-    def _generate_peakwindows(self):
-        try:
-            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-                required_vars = ["peak_name", "peak_start_time", "peak_end_time", "peak_retention_time"]
-                for var in required_vars:
-                    if var not in rootgrp.variables:
-                        raise KeyError(f"Missing '{var}' in {self.filename}")
-                peak_names =  ncdf.chartostring(rootgrp.variables["peak_name"][:])
-                
-                peak_start_times = rootgrp.variables["peak_start_time"][:]
-                peak_end_times = rootgrp.variables["peak_end_time"][:]
-
-                return pd.DataFrame({
-                    "peak_name": peak_names,
-                    "peak_window_start_time": peak_start_times,
-                    "peak_window_end_time": peak_end_times})
-        except Exception as e:
-            print(f"Error reading peak start or end times: {e}")
-    def _generate_peaklocations(self):
-        try:
-            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
-                required_vars = ["peak_name", 'baseline_start_time', 'baseline_stop_time', "peak_retention_time"]
+                required_vars = attribute_guide[attribute]
                 for var in required_vars:
                     if var not in rootgrp.variables:
                         raise KeyError(f"Missing '{var}' in {self.filename}")
@@ -175,20 +182,35 @@ class Chromatogram:
     def __repr__(self):
         return f"Chromatogram({self.filename.name})"
  
-class Day:
-    """Represents a single day of chromatogram data."""
+class DataAnalysis:
+    """Represents a single year, month, or day of chromatogram data."""
 
-    def __init__(self, site_path, date):
+    def __init__(self, site_path, year, month = None, day = None):
         """
-        Creates Day object that contains chromatogram objects collected that day.
+        Creates DataAnalysis object that contains chromatogram objects collected over a year, month, or day.
         Parameters:
             site_path: str | Path -> path to site root
-            date: str -> date in the format YYYYMMDD
+            year: str or int-> year of interest. If no other date inputs are entered, data from the whole year will be extracted
+            month: str or int -> month of interest.
+            day: str or int -> day of interest
         """
-        self.date = datetime.strptime(date, "%Y%m%d")
-        self.folder = Path(site_path) / str(self.date.year) / f"{self.date.month:02d}" / f"{self.date.day:02d}"
+        self.date = [year, month, day]
+        self.folder = self._find_root_dir(site_path = site_path, date = self.date)
         self.filename = self.folder.stem
-        self.chromatograms = self.get_samples(self.folder)
+        self.samples = self._get_chromatograms(self.folder, 's')
+        self.cvs = self._get_chromatograms(self.folder, 'c')
+        self.lcs = self._get_chromatograms(self.folder, 'e')
+        self.blank = self._get_chromatograms(self.folder, 'b')
+        self.rts = self._get_chromatograms(self.folder, 'q')
+        
+    def _find_root_dir(self, site_path, date: list):
+        root_dir = Path(site_path) / str(date[0])
+        for j in date[1:]:
+            if j:
+                root_dir = root_dir / f"{int(j):02d}"
+        return root_dir
+                
+            
     def _chrom_type(self, filename):
         pattern = r"(?P<site>[A-Z]{2})(?P<sample_type>[A-Z])(?P<month>[A-Z])(?P<day>\d{2})(?P<hour>[A-Z]).*-(?P<column>Front Signal|Back Signal)"
         match = re.match(pattern, filename, re.IGNORECASE)
@@ -205,18 +227,19 @@ class Day:
                 "column": None
             }
      
-    def get_samples(self, path):
+    def _get_chromatograms(self, path, sample_type_letter):
         """
         Returns a list of Sample/Blank/RTS/CVS/LCS objects
         by pairing Front and Back Signal files.
         """
+
         if not path.exists():
             print(f"Warning: Folder does not exist → {path}")
             return []
 
         # Step 1: scan all files and parse metadata
         files_by_run = defaultdict(dict)
-        for file in path.glob("*.cdf"):
+        for file in path.rglob("**/*.cdf"):
             info = self._chrom_type(file.stem)
             if not info["sample_type"]:
                 continue  # skip unrecognized files
@@ -242,25 +265,25 @@ class Day:
         }
 
         for run_key, paths in files_by_run.items():
-            front = paths.get("front")
-            back = paths.get("back")
-            if front and back:
-                sample_type = run_key[1].lower()
-                cls = type_map.get(sample_type)
-                if cls:
-                    result_objects.append(cls(front, back))
+            if run_key[1] == sample_type_letter:
+                front = paths.get("front")
+                back = paths.get("back")
+                if front and back:
+                    sample_type = run_key[1].lower()
+                    cls = type_map.get(sample_type)
+                    if cls:
+                        result_objects.append(cls(front, back))
+                    else:
+                        print(f"⚠️ Unknown sample type '{sample_type}' for run {run_key}")
                 else:
-                    print(f"⚠️ Unknown sample type '{sample_type}' for run {run_key}")
-            else:
-                print(f"⚠️ Missing front or back file for run {run_key}")
+                    print(f"⚠️ Missing front or back file for run {run_key}")
 
         return result_objects
         
         
     def __str__(self):
         return f"{self.folder}"
-
-
+        
 
         
 
@@ -312,31 +335,13 @@ class DetectionLimitCombined:
         self.detectionlimits = None
 #%%
 if __name__ == "__main__":
-    d1 = Day(r"C:\AutoGCData\RB", "20250802")
-    print(f"Day folder: {d1}")
-    print(f"Chromatograms found: {len(d1.chromatograms)}")
-    att = d1.chromatograms[1].front.list_netcdf_attributes()
-    attribute_dict = {}
-    for attribute in att:
-        attribute_dict[attribute] = d1.chromatograms[1].front.examine_netcdf_attribute(attribute)
-        
-    print(d1.chromatograms[1].front.list_netcdf_variables())
-    variables = list(d1.chromatograms[1].front.list_netcdf_variables())
-    variable_values_dict = {}
-    variable_attributes_list = []
-    for variable in variables:
-        variable_values_dict[variable] = d1.chromatograms[1].front.examine_netcdf_variable(variable)[0]
-    peakwindows=[]
-    peakamounts = []
-    peaklocations = []
-    baseline_start = pd.DataFrame()
-    baseline_end = []
-    for i, chrom in enumerate(d1.chromatograms):
-        peaklocations.append(chrom.back.peaklocations)
-        peakwindows.append(chrom.back.peakwindows)
-        peakamounts.append(chrom.back.peakamounts)
-        baseline_end.append([chrom.back.examine_netcdf_variable('baseline_start_time')[0][:],chrom.back.examine_netcdf_variable('baseline_stop_time')[0][:]])
-        
+    c = pcp.Compound.from_cid(8058)
+    print(c.molecular_formula)
+    print(c.molecular_weight)
+    print(c.elements)
+    
+    
+    
 
 
 
