@@ -16,7 +16,7 @@ from scipy.optimize import curve_fit
 from scipy.integrate import simpson
 from scipy.stats import chi2
 
-#%%
+#%% Baseline
 def baseline(data, half_window=20, threshold=0.003, min_length=5, min_fwhm = None, smooth_half_window=5):
     """
     Baseline correction using pybaselines fastchrom
@@ -88,7 +88,7 @@ def baseline(data, half_window=20, threshold=0.003, min_length=5, min_fwhm = Non
 from typing import List, Tuple
 
 
-
+#%% Peak Finder
 def find_peak_regions(mask_1d: np.ndarray) -> List[Tuple[int, int]]:
     """
     Find start and end indices of continuous True regions in a 1D boolean array.
@@ -141,9 +141,7 @@ def extract_valid_peak_regions_to_dataframe(data_2d: np.ndarray, mask_1d: np.nda
     
     # Single DataFrame creation
     return pd.DataFrame.from_dict(data_dict)
-def gaussian(x, amplitude, center, sigma):
-    """Gaussian function for peak fitting"""
-    return amplitude * np.exp(-((x - center) ** 2) / (2 * sigma ** 2))
+
 
 def identify_peak_centers(peak_region_data, noise_threshold):
     """
@@ -165,7 +163,7 @@ def identify_peak_centers(peak_region_data, noise_threshold):
             height=noise_threshold, 
             prominence=noise_threshold,
             width=5,
-            distance=.5
+            distance= 10
         )
     except Exception as e:
         print(f"Peak finding failed: {e}")
@@ -187,7 +185,10 @@ def identify_peak_centers(peak_region_data, noise_threshold):
         })
     
     return peak_centers
-
+#%% Gaussian Fitting Functions
+def gaussian(x, amplitude, center, sigma):
+    """Gaussian function for peak fitting"""
+    return amplitude * np.exp(-((x - center) ** 2) / (2 * sigma ** 2))
 def fit_single_gaussian(peak_region_data, peak_center_info, baseline_noise):
     """
     Fit a Gaussian function to a single peak within a region.
@@ -432,6 +433,7 @@ def fit_multi_gaussian(peak_region_data, peak_centers, baseline_noise, max_peaks
             'individual_peaks': [],
             'individual_peak_arrays': []  # Empty list even on failure
         }
+#%% Full Chromatogram Analysis Function     
 def analyze_chromatogram(chrom):
     base = baseline(chrom, half_window=30, threshold=0.002, min_length=2, min_fwhm = None, smooth_half_window=5)
     corrected_array = base['corrected_arr']
@@ -508,7 +510,7 @@ def analyze_chromatogram(chrom):
 
 
 if __name__ == "__main__":
-    c1 = cc.Chromatogram(r"C:\Users\aengstrom\AutoGC\RB\validation\08\processed\ezchrom_outputs\cdf\rbsh01ndat-Back Signal.cdf",dataformat="cdf")
+    c1 = cc.Chromatogram(r"C:\Users\aengstrom\AutoGC\RB\validation\08\processed\ezchrom_outputs\cdf\rbch07adat-Back Signal.cdf",dataformat="cdf")
     chrom = c1.chromatogram
     peak_info = analyze_chromatogram(chrom)
     
