@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "validationtools"
+version = "0.0.1"
+description = "Alex's tools for VOC data validation work"
+authors = [
+{name = "Alex Engstrom", email = "aengstrom@utah.gov"}
+]
+dependencies = [
+]
+[tool.setuptools]
+packages = ["validationtools"]

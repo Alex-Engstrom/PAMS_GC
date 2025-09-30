@@ -15,7 +15,6 @@ import re
 from collections import defaultdict
 from dateutil import parser
 import os
-from chemformula import ChemFormula
 import pubchempy as pcp
 from collections import defaultdict
 #%% Reference Tables
@@ -209,6 +208,70 @@ aqs_compound_codes = {
     "TNMTC": 43102,
     "TNMHC": 43000
 }
+plot_compounds = [
+    "Ethane",
+    "Ethylene",
+    "Propane",
+    "Propylene",
+    "Iso-butane",
+    "n-Butane",
+    "Acetylene",
+    "trans-2-Butene",
+    "1-Butene",
+    "cis-2-Butene",
+    "Cyclopentane",
+    "Iso-pentane",
+    "n-Pentane",
+    "1,3-Butadiene",
+    "trans-2-Pentene",
+    "1-Pentene",
+    "cis-2-Pentene",
+    "2,2-Dimethylbutane",
+    "2,3-Dimethylbutane",
+    "2-Methylpentane",
+    "3-Methylpentane",
+    "Isoprene",
+    #"2-Methyl-1-Pentene",    #Not reported to AQS
+    "1-Hexene"
+    ]
+bp_compounds = [
+        "n-Hexane",
+        "Methylcyclopentane",
+        "2,4-Dimethylpentane",
+        "Benzene",
+        "Cyclohexane",
+        "2-Methylhexane",
+        "2,3-Dimethylpentane",
+        "3-Methylhexane",
+        "2,2,4-Trimethylpentane",
+        "n-Heptane",
+        "Methylcyclohexane",
+        "2,3,4-Trimethylpentane",
+        "Toluene",
+        "2-Methylheptane",
+        "3-Methylheptane",
+        "n-Octane",
+        "Ethylbenzene",
+        "m&p-Xylene",
+        "Styrene",
+        "o-Xylene",
+        "n-Nonane",
+        "Iso-propylbenzene",
+        #"alpha-Pinene",       #Not reported to AQS
+        "n-Propylbenzene",
+        "m-ethyltoluene",
+        "p-Ethyltoluene",
+        "1,3,5-Tri-m-benzene",
+        "o-Ethyltoluene",
+        #"beta-Pinene",     #Not reported to AQS
+        "1,2,4-Tri-m-benzene",
+        "n-Decane",
+        "1,2,3-Tri-m-benzene",
+        "m-Diethylbenzene",
+        "p-Diethylbenzene",
+        "n-Undecane",
+        "n-Dodecane"
+    ]
 def reverse_aqs_compound_codes():
     return {value : key for key, value in aqs_compound_codes.items()}
 def plot_compound_list_generator():
@@ -725,7 +788,7 @@ class DetectionLimitCombined:
 #%% Data Analysis Functions
 def generate_df_from_aqs_file(aqs_file, transaction_type: str):
     column_names = aqs_file_guide[transaction_type]
-    return pd.read_csv(aqs_file, names = column_names, index_col = False, sep = "|")
+    return pd.read_csv(aqs_file, names = column_names, index_col = False, sep = "|", dtype = 'str')
 def summarize_blanks(aqs_file):
     aqs_df = generate_df_from_aqs_file(aqs_file=aqs_file, transaction_type="RB")
     aqs_df.columns = aqs_df.columns.str.replace(' ', '_').str.lower()
@@ -741,12 +804,55 @@ def summarize_blanks(aqs_file):
     date_series = lb_df.groupby('blank_date')['parameter'].apply(lambda x: [aqs_code_to_voc_name.get(p) for p in x]).reset_index(name = 'failing_blanks')
     # Returns a series with an the index as the datetime object and the value a list of vocs with LB flags on that day
     return date_series
+
+def summarize_nulls(aqs_file):
+    aqs_df = generate_df_from_aqs_file(aqs_file=aqs_file, transaction_type="RD")
+    aqs_df.columns = aqs_df.columns.str.replace(' ', '_').str.lower()
+    aqs_df['sample_datetime'] = aqs_df['sample_date']+' '+aqs_df['sample_begin_time']
+    aqs_df['sample_datetime'] = pd.to_datetime(aqs_df['sample_datetime'], errors='coerce')
+    needed_columns = ['sample_datetime', 'null_data_code', 'parameter']
+    aqs_df_clean = aqs_df[needed_columns]
+    by_null_code = aqs_df_clean.groupby(['null_data_code', 'sample_datetime']).agg(list).reset_index()
+    nulls_by_date = aqs_df_clean.groupby(['sample_datetime'])['null_data_code'].count().reset_index()
+    nulls_by_count = nulls_by_date.groupby(['null_data_code'])['sample_datetime'].agg(list).reset_index()
+    full_hour_nulls = {}
+    column_nulls = {'plot': {}, 'bp': {}}
+    compound_nulls = {}
+    for code in [code for code in by_null_code['null_data_code'].unique() if code not in ['AY', 'TC']]:
+        mask = by_null_code['null_data_code'] == code
+        masked_by_null_code = by_null_code[mask]
+        for index,row in masked_by_null_code.iterrows():
+            date_time = row['sample_datetime']
+            compounds = row['parameter']
+            
+            if len(compounds) == 58:
+                if code not in full_hour_nulls:
+                    full_hour_nulls[code] = []
+                full_hour_nulls[code].append(date_time)
+                
+            elif len(compounds) < 58:
+                aqs_code_to_voc_name = reverse_aqs_compound_codes()
+                compound_names = [aqs_code_to_voc_name.get(int(p)) for p in compounds if p not in ['43000','43102']]
+                # Make sure all names are strings and handle None values
+                compound_names = [name for name in compound_names if name is not None]
+                
+                if sorted([name.lower() for name in compound_names]) == sorted([name.lower() for name in plot_compounds]):
+                    if code not in column_nulls['plot']:
+                        column_nulls['plot'][code] = []
+                    column_nulls['plot'][code].append(date_time)
+                elif sorted([name.lower() for name in compound_names]) == sorted([name.lower() for name in bp_compounds]):
+                    if code not in column_nulls['bp']:
+                        column_nulls['bp'][code] = []
+                    column_nulls['bp'][code].append(date_time)
+                else:
+                    compound_names = [aqs_code_to_voc_name.get(int(p)) for p in compounds]
+                    print(date_time, compound_names)
+                
+    return full_hour_nulls, column_nulls, nulls_by_count
 #%% Main
 if __name__ == "__main__":
-    aqs_df = generate_df_from_aqs_file(aqs_file = r"C:\Users\aengstrom\Desktop\RB_SITE-RB_RedButte_INSERT_08-01-2025_to_08-31-2025.txt", transaction_type = "RB")
-    blanks = summarize_blanks(aqs_file = r"C:\Users\aengstrom\Desktop\RB_SITE-RB_RedButte_INSERT_08-01-2025_to_08-31-2025.txt")
-    blanks_dict = blanks.to_dict(orient = 'list')
-    print(blanks_dict)
+    hour_nulls, column_nulls, test = summarize_nulls(r"C:\Users\aengstrom\Desktop\RD_SITE-HW_INSERT_01-01-2025_to_01-31-2025.txt")
+
     
         
 
