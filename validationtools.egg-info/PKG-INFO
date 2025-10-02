@@ -1,3 +1,5 @@
 Metadata-Version: 2.4
 Name: validationtools
-Version: 0.0.0
+Version: 0.0.1
+Summary: Alex's tools for VOC data validation work
+Author-email: Alex Engstrom <aengstrom@utah.gov>

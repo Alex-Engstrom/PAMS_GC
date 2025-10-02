@@ -272,8 +272,71 @@ bp_compounds = [
         "n-Undecane",
         "n-Dodecane"
     ]
-def reverse_aqs_compound_codes():
-    return {value : key for key, value in aqs_compound_codes.items()}
+def reverse_aqs_compound_codes(aqs_code_dict = {
+    "Ethane": 43202,
+    "Ethylene": 43203,
+    "Propane": 43204,
+    "Propylene": 43205,
+    "Iso-butane": 43214,
+    "N-butane": 43212,
+    "Acetylene": 43206,
+    "Trans-2-butene": 43216,
+    "1-butene": 43280,
+    "Cis-2-butene": 43217,
+    "Cyclopentane": 43242,
+    "Iso-pentane": 43221,
+    "N-pentane": 43220,
+    "1,3-butadiene": 43218,
+    "Trans-2-pentene": 43226,
+    "1-pentene": 43224,
+    "Cis-2-pentene": 43227,
+    "2,2-dimethylbutane": 43244,
+    "2,3-dimethylbutane": 43284,
+    "2-methylpentane": 43285,
+    "3-methylpentane": 43230,
+    "Isoprene": 43243,
+    "2-methyl-1-pentene": 43246,
+    "1-hexene": 43245,
+    "N-hexane": 43231,
+    "Methylcyclopentane": 43262,
+    "2,4-dimethylpentane": 43247,
+    "Benzene": 45201,
+    "Cyclohexane": 43248,
+    "2-methylhexane": 43263,
+    "2,3-dimethylpentane": 43291,
+    "3-methylhexane": 43249,
+    "2,2,4-trimethylpentane": 43250,
+    "N-heptane": 43232,
+    "Methylcyclohexane": 43261,
+    "2,3,4-trimethylpentane": 43252,
+    "Toluene": 45202,
+    "2-methylheptane": 43960,
+    "3-methylheptane": 43253,
+    "N-octane": 43233,
+    "Ethylbenzene": 45203,
+    "M&p-xylene": 45109,
+    "Styrene": 45220,
+    "O-xylene": 45204,
+    "N-nonane": 43235,
+    "Iso-propylbenzene": 45210,
+    "Alpha-pinene": 43256,
+    "N-propylbenzene": 45209,
+    "M-ethyltoluene": 45212,
+    "P-ethyltoluene": 45213,
+    "1,3,5-tri-m-benzene": 45207,
+    "O-ethyltoluene": 45211,
+    "Beta-pinene": 43257,
+    "1,2,4-tri-m-benzene": 45208,
+    "N-decane": 43238,
+    "1,2,3-tri-m-benzene": 45225,
+    "M-diethylbenzene": 45218,
+    "P-diethylbenzene": 45219,
+    "N-undecane": 43954,
+    "N-dodecane": 43141,
+    "TNMTC": 43102,
+    "TNMHC": 43000
+    }):
+    return {value : key for key, value in aqs_code_dict.items()}
 def plot_compound_list_generator():
     plot_cid_list = [
     6324,  # Ethane
@@ -801,7 +864,7 @@ def summarize_blanks(aqs_file):
     lb_df = aqs_df[lb_mask]
     aqs_code_to_voc_name = reverse_aqs_compound_codes()
     # Group by blank_date and collect parameters
-    date_series = lb_df.groupby('blank_date')['parameter'].apply(lambda x: [aqs_code_to_voc_name.get(p) for p in x]).reset_index(name = 'failing_blanks')
+    date_series = lb_df.groupby('blank_date')['parameter'].apply(lambda x: [aqs_code_to_voc_name.get(int(p)) for p in x]).reset_index(name = 'failing_blanks')
     # Returns a series with an the index as the datetime object and the value a list of vocs with LB flags on that day
     return date_series
 
@@ -848,13 +911,53 @@ def summarize_nulls(aqs_file):
                     compound_names = [aqs_code_to_voc_name.get(int(p)) for p in compounds]
                     print(date_time, compound_names)
                 
-    return full_hour_nulls, column_nulls, nulls_by_count
-#%% Main
-if __name__ == "__main__":
-    hour_nulls, column_nulls, test = summarize_nulls(r"C:\Users\aengstrom\Desktop\RD_SITE-HW_INSERT_01-01-2025_to_01-31-2025.txt")
+    return  full_hour_nulls, nulls_by_count
 
+def summarize_qualifiers(aqs_file):
+    aqs_df = generate_df_from_aqs_file(aqs_file=aqs_file, transaction_type="RD")
+    aqs_df.columns = aqs_df.columns.str.replace(' ', '_').str.lower()
+    aqs_df['sample_datetime'] = aqs_df['sample_date']+' '+aqs_df['sample_begin_time']
+    aqs_df['sample_datetime'] = pd.to_datetime(aqs_df['sample_datetime'], errors='coerce')
     
-        
+    # Melt the code columns into a long format
+    code_cols = [col for col in aqs_df.columns if col.startswith("qualifier")]
+    df_long = aqs_df.melt(
+        id_vars=['sample_datetime', 'parameter'],
+        value_vars=code_cols,
+        value_name='code'
+    ).dropna(subset=['code'])
+    
+    # Now we can group by compound and code
+    summary = (
+        df_long
+        .groupby(['parameter', 'code'])
+        .agg(
+            count=('code', 'count'),          # How many times this code was applied
+            dates=('sample_datetime', lambda x: list(x)) # List of dates
+        )
+        .reset_index()
+    )
+    mask = ~summary['code'].isin(['MD', 'SQ', 'ND', 'LB'])
+    return summary[mask]
+    
+# #%% Main
+# if __name__ == "__main__":
+#     #full_hour_nulls, nulls_by_count = summarize_nulls(r"C:\Users\aengstrom\Desktop\RD_SITE-RB_RedButte_INSERT_08-01-2025_to_08-31-2025.txt")
+#     #blank_dict = summarize_blanks(aqs_file=r"C:\Users\aengstrom\Desktop\RB_SITE-RB_RedButte_INSERT_08-01-2025_to_08-31-2025.txt")
+#     aqs_file_rd = r"C:\Users\aengstrom\Desktop\RD_SITE-RB_RedButte_INSERT_08-01-2025_to_08-31-2025.txt"
+#     code_to_name = dt.reverse_aqs_compound_codes()
+#     qualifiers = dt.summarize_qualifiers(aqs_file_rd)
+#     for code in qualifiers['code'].unique():
+#         print(f"- **{code}**")
+#         mask = qualifiers['code'] == code
+#         masked = qualifiers[mask]
+#         for index, row in masked.iterrows():
+#             compound_code = int(row['parameter'])
+#             hours = row['count']
+#             voc_name =  code_to_name.get(compound_code)
+#             print(f"  - {voc_name} : {hours} hour(s) qualified")
+
+
 
     
 
