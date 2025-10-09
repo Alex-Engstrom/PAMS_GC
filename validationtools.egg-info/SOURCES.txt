@@ -1,6 +1,6 @@
-README.md
 pyproject.toml
 validationtools/__init__.py
+validationtools/chrommanager.py
 validationtools/dataanalysis.py
 validationtools/file_management_functions.py
 validationtools/peakfitting.py

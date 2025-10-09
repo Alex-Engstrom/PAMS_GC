@@ -1,0 +1,396 @@
+
+import netCDF4 as ncdf
+import numpy as np
+import pandas as pd
+from datetime import datetime
+from pathlib import Path
+import re
+from collections import defaultdict
+from dateutil import parser
+
+#%% Class Definitions
+class Chromatogram:
+    """Handles chromatogram data from .cdf files."""
+    def __init__(self, filename, dataformat="cdf"):
+        self.format = dataformat
+        self.filename = Path(filename)
+        self._datetime = None
+        self._chromatogram = None
+        self._peakamounts = None
+        self._peakwindows = None
+        self._peaklocations = None
+        self._loaded = False
+        self._error = None
+
+    def load(self):
+        """Explicitly load all data"""
+        try:
+            self._datetime = self._get_datetime()
+            self._chromatogram = self._generate_chrom()
+            self._peakamounts = self._generate_class_attributes('peakamounts')
+            self._peakwindows = self._generate_class_attributes('peakwindows')
+            self._peaklocations = self._generate_class_attributes('peaklocations')
+            self._loaded = True
+            self._error = None
+        except Exception as e:
+            self._error = str(e)
+            raise
+
+    @property
+    def datetime(self):
+        if not self._loaded and self._datetime is None:
+            self._datetime = self._get_datetime()
+        return self._datetime
+
+    @property
+    def chromatogram(self):
+        if not self._loaded and self._chromatogram is None:
+            self._chromatogram = self._generate_chrom()
+        return self._chromatogram
+
+    @property
+    def peakamounts(self):
+        if not self._loaded and self._peakamounts is None:
+            self._peakamounts = self._generate_class_attributes('peakamounts')
+        return self._peakamounts
+    
+    @property
+    def peakwindows(self):
+        if not self._loaded and self._peakwindows is None:
+            self._peakwindows = self._generate_class_attributes('peakwindows')
+        return self._peakwindows
+
+    @property
+    def peaklocations(self):
+        if not self._loaded and self._peaklocations is None:
+            self._peaklocations = self._generate_class_attributes('peaklocations')
+        return self._peaklocations
+
+        
+    def _get_datetime(self):
+        """Private method to get datetime"""
+        try:
+            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+                # Example: get datetime from file metadata
+                if 'dataset_date_time_stamp' in rootgrp.ncattrs():
+                    date_string = rootgrp.dataset_date_time_stamp
+                    return parser.parse(date_string)
+                else:
+                    # Fallback: use file modification time
+                    return datetime.fromtimestamp(self.filename.stat().st_mtime)
+        except Exception as e:
+            print(f"Error getting datetime: {e}")
+            return None
+        
+    def _generate_chrom(self):
+        """Private method to generate chromatogram"""
+        try:
+            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+                required_vars = ["ordinate_values", "actual_run_time_length", "actual_delay_time", 'actual_sampling_interval']
+                for var in required_vars:
+                    if var not in rootgrp.variables:
+                        raise KeyError(f"Missing '{var}' in {self.filename}")
+                
+                signal = np.array(rootgrp.variables["ordinate_values"][:])
+                runtime = float(rootgrp.variables["actual_run_time_length"][0])
+                starttime = float(rootgrp.variables["actual_delay_time"][0])
+                interval = float(rootgrp.variables['actual_sampling_interval'][0])
+                rt = np.arange(starttime, runtime, interval)
+                return np.vstack((rt, signal))
+        except Exception as e:
+            print(f"Error accessing file {self.filename}: {e}")
+            return None
+            
+    def _generate_class_attributes(self, attribute: str):
+        """Private method to generate attributes"""
+        attribute_guide = {'peaklocations': ["peak_name", 'baseline_start_time', 'baseline_stop_time', 'baseline_start_value', 'baseline_stop_value', "peak_retention_time"],
+                           'peakamounts': ["peak_name", "peak_amount"],
+                           'peakwindows': ["peak_name", "peak_start_time", "peak_end_time", "peak_retention_time"]}
+        try:
+            with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+                required_vars = attribute_guide[attribute]
+                for var in required_vars:
+                    if var not in rootgrp.variables:
+                        raise KeyError(f"Missing '{var}' in {self.filename}")
+                data = {var: ncdf.chartostring(rootgrp.variables[var][:]) if var == "peak_name" 
+                        else rootgrp.variables[var][:]
+                        for var in required_vars}
+
+                return pd.DataFrame(data)
+        except Exception as e:
+            print(f"Error reading peak start or end times: {e}")
+    
+    def list_netcdf_variables(self):
+        with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+            return rootgrp.variables.keys()
+    def list_netcdf_attributes(self):
+        with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+            return rootgrp.__dict__
+    def examine_netcdf_variable(self, variable):
+        with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+            return rootgrp.variables[variable][:], rootgrp.variables[variable].__dict__
+    def examine_netcdf_attribute(self, attribute):
+        with ncdf.Dataset(self.filename, "r", format="NETCDF3_CLASSIC") as rootgrp:
+            return getattr(rootgrp, attribute)
+    
+
+    def __repr__(self):
+        return f"Chromatogram({self.filename.name})"
+    
+class DataAnalysis:
+    """Represents a single year, month, or day of chromatogram data."""
+
+    def __init__(self, site_path, year, month = None, day = None):
+        """
+        Creates DataAnalysis object that contains chromatogram objects collected over a year, month, or day.
+        Parameters:
+            site_path: str | Path -> path to site root
+            year: str or int-> year of interest. If no other date inputs are entered, data from the whole year will be extracted
+            month: str or int -> month of interest.
+            day: str or int -> day of interest
+        """
+        self.date = [year, month, day]
+        self.folder = self._find_root_dir(site_path = site_path, date = self.date)
+        self.filename = self.folder.stem
+        self.samples = self._get_chromatograms(self.folder, 's')
+        self.cvs = self._get_chromatograms(self.folder, 'c')
+        self.lcs = self._get_chromatograms(self.folder, 'e')
+        self.blank = self._get_chromatograms(self.folder, 'b')
+        self.rts = self._get_chromatograms(self.folder, 'q')
+        
+    def _find_root_dir(self, site_path, date: list):
+        root_dir = Path(site_path) / str(date[0])
+        for j in date[1:]:
+            if j:
+                root_dir = root_dir / f"{int(j):02d}"
+        return root_dir
+                
+            
+    def _chrom_type(self, filename):
+        pattern = r"(?P<site>[A-Z]{2})(?P<sample_type>[A-Z])(?P<month>[A-Z])(?P<day>\d{2})(?P<hour>[A-Z]).*-(?P<column>Front Signal|Back Signal)"
+        match = re.match(pattern, filename, re.IGNORECASE)
+        if match:
+            return match.groupdict()
+        else:
+            print(f"Could not identify match for {filename}")
+            return {
+                "site": None,
+                "sample_type": None,
+                "month": None,
+                "day": None,
+                "hour": None,
+                "column": None
+            }
+     
+    def _get_chromatograms(self, path, sample_type_letter):
+        """
+        Returns a list of Sample/Blank/RTS/CVS/LCS objects
+        by pairing Front and Back Signal files.
+        """
+
+        if not path.exists():
+            print(f"Warning: Folder does not exist → {path}")
+            return []
+
+        # Step 1: scan all files and parse metadata
+        files_by_run = defaultdict(dict)
+        for file in path.rglob("**/*.cdf"):
+            info = self._chrom_type(file.stem)
+            if not info["sample_type"]:
+                continue  # skip unrecognized files
+
+            # unique key for a run: site+sample_type+month+day+hour
+            run_key = (info["site"], info["sample_type"], info["month"], info["day"], info["hour"])
+            
+            if info["column"].lower() == "front signal":
+                files_by_run[run_key]["front"] = file
+            elif info["column"].lower() == "back signal":
+                files_by_run[run_key]["back"] = file
+
+        # Step 2: instantiate objects based on sample_type
+        result_objects = []
+        type_map = {
+            "s": Sample,
+            "b": Blank,
+            "c": CVS,
+            "q": RTS,
+            "e": LCS,
+            "d": DetectionLimit,
+            "m": Calibration
+        }
+
+        for run_key, paths in files_by_run.items():
+            if run_key[1] == sample_type_letter:
+                front = paths.get("front")
+                back = paths.get("back")
+                if front and back:
+                    sample_type = run_key[1].lower()
+                    cls = type_map.get(sample_type)
+                    if cls:
+                        result_objects.append(cls(front, back))
+                    else:
+                        print(f"⚠️ Unknown sample type '{sample_type}' for run {run_key}")
+                else:
+                    print(f"⚠️ Missing front or back file for run {run_key}")
+
+        return result_objects
+    def generate_blank_summary(self, mdls):
+        mdl_df = pd.DataFrame.from_dict(mdls, orient = 'columns')
+        df_columns = ['date_time']
+        df_columns.extend([str(list(voc.keys())[0]) for voc in FrontDetectorChromatogram.plot_vocs])
+        df_columns.extend([str(list(voc.keys())[0]) for voc in BackDetectorChromatogram.bp_vocs])
+        blank_df = pd.DataFrame(columns = df_columns)
+        for chrom in self.blank:
+            front, back = chrom.front, chrom.back
+            date_front, date_back = front.datetime, back.datetime
+            if date_front != date_back:
+                print('front and back chromatograms do not have the same date values') 
+            else:
+                voc_amounts = pd.concat([front.peakamounts, back.peakamounts], ignore_index =True)
+                new_row = {col: None for col in blank_df.columns}
+                new_row['date_time'] = date_front
+                for index, row in voc_amounts.iterrows():
+                    compound_name = row['peak_name']
+                    amount = row['peak_amount']
+                    if compound_name in blank_df.columns:
+                        new_row[compound_name]= amount
+                blank_df = pd.concat([blank_df, pd.DataFrame([new_row])], ignore_index = True)
+        return blank_df
+                    
+                    
+
+                        
+
+                
+                
+                
+                
+                
+            
+        
+            
+        
+    def __str__(self):
+        return f"{self.folder}"
+        
+
+    
+class PAMSSite(DataAnalysis):
+    def __init__(self):
+        self.test = None
+
+class RB(DataAnalysis):     
+    sitename = 'RB'
+    aqscode = None       
+    def __init__(self, site_path, year, month = None, day = None):
+        self.mdl = self.get_mdl()
+    def get_mdl(self):
+        return pd.read_csv('rb_mdl.csv')
+
+class FrontDetectorChromatogram(Chromatogram):
+    rf = 6104
+    plot_vocs = [
+                  {'Ethane': {'molecular_formula': 'C2H6', 'molecular_weight': 30.07, 'carbon_content': 2, 'hydrogen_content': 6, 'cid': 6324}}, 
+                  {'Ethylene': {'molecular_formula': 'C2H4', 'molecular_weight': 28.05, 'carbon_content': 2, 'hydrogen_content': 4, 'cid': 6325}}, 
+                  {'Propane': {'molecular_formula': 'C3H8', 'molecular_weight': 44.1, 'carbon_content': 3, 'hydrogen_content': 8, 'cid': 6334}}, 
+                  {'Propylene': {'molecular_formula': 'C3H6', 'molecular_weight': 42.08, 'carbon_content': 3, 'hydrogen_content': 6, 'cid': 8252}}, 
+                  {'Iso-butane': {'molecular_formula': 'C4H10', 'molecular_weight': 58.12, 'carbon_content': 4, 'hydrogen_content': 10, 'cid': 6360}}, 
+                  {'n-Butane': {'molecular_formula': 'C4H10', 'molecular_weight': 58.12, 'carbon_content': 4, 'hydrogen_content': 10, 'cid': 7843}}, 
+                  {'Acetylene': {'molecular_formula': 'C2H2', 'molecular_weight': 26.04, 'carbon_content': 2, 'hydrogen_content': 2, 'cid': 6326}}, 
+                  {'trans-2-Butene': {'molecular_formula': 'C4H8', 'molecular_weight': 56.11, 'carbon_content': 4, 'hydrogen_content': 8, 'cid': 62695}}, 
+                  {'1-Butene': {'molecular_formula': 'C4H8', 'molecular_weight': 56.11, 'carbon_content': 4, 'hydrogen_content': 8, 'cid': 7844}}, 
+                  {'cis-2-Butene': {'molecular_formula': 'C4H8', 'molecular_weight': 56.11, 'carbon_content': 4, 'hydrogen_content': 8, 'cid': 5287573}}, 
+                  {'Cyclopentane': {'molecular_formula': 'C5H10', 'molecular_weight': 70.13, 'carbon_content': 5, 'hydrogen_content': 10, 'cid': 9253}}, 
+                  {'Iso-pentane': {'molecular_formula': 'C5H12', 'molecular_weight': 72.15, 'carbon_content': 5, 'hydrogen_content': 12, 'cid': 6556}},
+                  {'n-Pentane': {'molecular_formula': 'C5H12', 'molecular_weight': 72.15, 'carbon_content': 5, 'hydrogen_content': 12, 'cid': 8003}}, 
+                  {'1,3-Butadiene': {'molecular_formula': 'C4H6', 'molecular_weight': 54.09, 'carbon_content': 4, 'hydrogen_content': 6, 'cid': 7845}}, 
+                  {'trans-2-Pentene': {'molecular_formula': 'C5H10', 'molecular_weight': 70.13, 'carbon_content': 5, 'hydrogen_content': 10, 'cid': 5326161}},
+                  {'1-Pentene': {'molecular_formula': 'C5H10', 'molecular_weight': 70.13, 'carbon_content': 5, 'hydrogen_content': 10, 'cid': 8004}}, 
+                  {'cis-2-Pentene': {'molecular_formula': 'C5H10', 'molecular_weight': 70.13, 'carbon_content': 5, 'hydrogen_content': 10, 'cid': 5326160}}, 
+                  {'2,2-Dimethylbutane': {'molecular_formula': 'C6H14', 'molecular_weight': 86.18, 'carbon_content': 6, 'hydrogen_content': 14, 'cid': 6403}}, 
+                  {'2,3-Dimethylbutane': {'molecular_formula': 'C6H14', 'molecular_weight': 86.18, 'carbon_content': 6, 'hydrogen_content': 14, 'cid': 6589}}, 
+                  {'2-Methylpentane': {'molecular_formula': 'C6H14', 'molecular_weight': 86.18, 'carbon_content': 6, 'hydrogen_content': 14, 'cid': 7892}}, 
+                  {'3-Methylpentane': {'molecular_formula': 'C6H14', 'molecular_weight': 86.18, 'carbon_content': 6, 'hydrogen_content': 14, 'cid': 7282}},
+                  {'Isoprene': {'molecular_formula': 'C5H8', 'molecular_weight': 68.12, 'carbon_content': 5, 'hydrogen_content': 8, 'cid': 6557}},
+                  {'2-Methyl-1-Pentene': {'molecular_formula': 'C6H12', 'molecular_weight': 84.16, 'carbon_content': 6, 'hydrogen_content': 12, 'cid': 12986}}, 
+                  {'1-Hexene': {'molecular_formula': 'C6H12', 'molecular_weight': 84.16, 'carbon_content': 6, 'hydrogen_content': 12, 'cid': 11597}}
+                  ]
+    pass
+
+    
+class BackDetectorChromatogram(Chromatogram):
+    rf = 5828
+    bp_vocs = [
+               {'n-Hexane': {'molecular_formula': 'C6H14', 'molecular_weight': 86.18, 'carbon_content': 6, 'hydrogen_content': 14, 'cid': 8058}}, 
+               {'Methylcyclopentane': {'molecular_formula': 'C6H12', 'molecular_weight': 84.16, 'carbon_content': 6, 'hydrogen_content': 12, 'cid': 7296}},
+               {'2,4-Dimethylpentane': {'molecular_formula': 'C7H16', 'molecular_weight': 100.2, 'carbon_content': 7, 'hydrogen_content': 16, 'cid': 7907}}, 
+               {'Benzene': {'molecular_formula': 'C6H6', 'molecular_weight': 78.11, 'carbon_content': 6, 'hydrogen_content': 6, 'cid': 241}}, 
+               {'Cyclohexane': {'molecular_formula': 'C6H12', 'molecular_weight': 84.16, 'carbon_content': 6, 'hydrogen_content': 12, 'cid': 8078}}, 
+               {'2-Methylhexane': {'molecular_formula': 'C7H16', 'molecular_weight': 100.2, 'carbon_content': 7, 'hydrogen_content': 16, 'cid': 11582}}, 
+               {'2,3-Dimethylpentane': {'molecular_formula': 'C7H16', 'molecular_weight': 100.2, 'carbon_content': 7, 'hydrogen_content': 16, 'cid': 11260}}, 
+               {'3-Methylhexane': {'molecular_formula': 'C7H16', 'molecular_weight': 100.2, 'carbon_content': 7, 'hydrogen_content': 16, 'cid': 11507}}, 
+               {'2,2,4-Trimethylpentane': {'molecular_formula': 'C8H18', 'molecular_weight': 114.23, 'carbon_content': 8, 'hydrogen_content': 18, 'cid': 10907}}, 
+               {'n-Heptane': {'molecular_formula': 'C7H16', 'molecular_weight': 100.2, 'carbon_content': 7, 'hydrogen_content': 16, 'cid': 8900}}, 
+               {'Methylcyclohexane': {'molecular_formula': 'C7H14', 'molecular_weight': 98.19, 'carbon_content': 7, 'hydrogen_content': 14, 'cid': 7962}}, 
+               {'2,3,4-Trimethylpentane': {'molecular_formula': 'C8H18', 'molecular_weight': 114.23, 'carbon_content': 8, 'hydrogen_content': 18, 'cid': 11269}},
+               {'Toluene': {'molecular_formula': 'C7H8', 'molecular_weight': 92.14, 'carbon_content': 7, 'hydrogen_content': 8, 'cid': 1140}}, 
+               {'2-Methylheptane': {'molecular_formula': 'C8H18', 'molecular_weight': 114.23, 'carbon_content': 8, 'hydrogen_content': 18, 'cid': 11594}},
+               {'3-Methylheptane': {'molecular_formula': 'C8H18', 'molecular_weight': 114.23, 'carbon_content': 8, 'hydrogen_content': 18, 'cid': 11519}}, 
+               {'n-Octane': {'molecular_formula': 'C8H18', 'molecular_weight': 114.23, 'carbon_content': 8, 'hydrogen_content': 18, 'cid': 356}}, 
+               {'Ethylbenzene': {'molecular_formula': 'C8H10', 'molecular_weight': 106.16, 'carbon_content': 8, 'hydrogen_content': 10, 'cid': 7500}}, 
+               {'m&p-Xylene': {'molecular_formula': 'C8H10', 'molecular_weight': 106.16, 'carbon_content': 8, 'hydrogen_content': 10, 'cid': 7929}}, 
+               {'Styrene': {'molecular_formula': 'C8H8', 'molecular_weight': 104.15, 'carbon_content': 8, 'hydrogen_content': 8, 'cid': 7501}},
+               {'o-Xylene': {'molecular_formula': 'C8H10', 'molecular_weight': 106.16, 'carbon_content': 8, 'hydrogen_content': 10, 'cid': 7237}}, 
+               {'n-Nonane': {'molecular_formula': 'C9H20', 'molecular_weight': 128.25, 'carbon_content': 9, 'hydrogen_content': 20, 'cid': 8141}}, 
+               {'Iso-propylbenzene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 7406}}, 
+               {'alpha-Pinene': {'molecular_formula': 'C10H16', 'molecular_weight': 136.23, 'carbon_content': 10, 'hydrogen_content': 16, 'cid': 6654}},
+               {'n-Propylbenzene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 7668}}, 
+               {'m-ethyltoluene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 12100}},
+               {'p-Ethyltoluene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 12160}}, 
+               {'1,3,5-Tri-m-benzene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 7947}}, 
+               {'o-Ethyltoluene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 11903}}, 
+               {'beta-Pinene': {'molecular_formula': 'C10H16', 'molecular_weight': 136.23, 'carbon_content': 10, 'hydrogen_content': 16, 'cid': 14896}}, 
+               {'1,2,4-Tri-m-benzene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 7247}}, 
+               {'n-Decane': {'molecular_formula': 'C10H22', 'molecular_weight': 142.28, 'carbon_content': 10, 'hydrogen_content': 22, 'cid': 15600}}, 
+               {'1,2,3-Tri-m-benzene': {'molecular_formula': 'C9H12', 'molecular_weight': 120.19, 'carbon_content': 9, 'hydrogen_content': 12, 'cid': 10686}},
+               {'m-Diethylbenzene': {'molecular_formula': 'C10H14', 'molecular_weight': 134.22, 'carbon_content': 10, 'hydrogen_content': 14, 'cid': 8864}}, 
+               {'p-Diethylbenzene': {'molecular_formula': 'C10H14', 'molecular_weight': 134.22, 'carbon_content': 10, 'hydrogen_content': 14, 'cid': 7734}},
+               {'n-Undecane': {'molecular_formula': 'C11H24', 'molecular_weight': 156.31, 'carbon_content': 11, 'hydrogen_content': 24, 'cid': 14257}}, 
+               {'n-Dodecane': {'molecular_formula': 'C12H26', 'molecular_weight': 170.33, 'carbon_content': 12, 'hydrogen_content': 26, 'cid': 8182}}
+               ]
+    pass
+
+
+class BaseSample:
+    def __init__(self, front_path, back_path):
+        self.front = FrontDetectorChromatogram(front_path)
+        self.back = BackDetectorChromatogram(back_path)
+# Specific sample types inherit from BaseSample
+class Sample(BaseSample):
+    pass
+
+class Blank(BaseSample):
+    pass
+
+class CVS(BaseSample):
+    pass
+
+class RTS(BaseSample):
+    pass
+
+class LCS(BaseSample):
+    pass
+
+class Calibration(BaseSample):
+    pass
+
+class CalibrationCurve:
+    def __init__(self):
+        self.calruns= None
+        
+class DetectionLimit(BaseSample):
+    pass
+
+class DetectionLimitCombined:
+    def __init__(self):
+        self.detectionlimits = None
