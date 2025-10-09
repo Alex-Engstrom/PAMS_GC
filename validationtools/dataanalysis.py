@@ -75,7 +75,7 @@ compound_categories = {
 }
 def sort_by_type(compound_categories):
     compound_df = pd.DataFrame(list(compound_categories.items()), columns=['compound', 'category'])
-    group_by_category = compound_df.groupby(['category'])['compound'].apply(lambda x: [aqs_compound_codes[c] for c in x])
+    group_by_category = compound_df.groupby(['category'])['compound'].apply(lambda x: [aqs_compound_to_code[c] for c in x])
     return group_by_category
 #%%% MDL
 rb_mdls = {
@@ -268,7 +268,7 @@ aqs_file_guide = {"RD":
                         ]
                 }
 #%%% AQS compound codes
-aqs_compound_codes = {
+aqs_compound_to_code = {
     "Ethane": 43202,
     "Ethylene": 43203,
     "Propane": 43204,
@@ -333,7 +333,7 @@ aqs_compound_codes = {
     "TNMHC": 43000
 }
 
-aqs_compound_codes_reversed = {43202: 'Ethane', 
+aqs_code_to_compound = {43202: 'Ethane', 
                                43203: 'Ethylene', 
                                43204: 'Propane', 
                                43205: 'Propylene', 
@@ -395,7 +395,7 @@ aqs_compound_codes_reversed = {43202: 'Ethane',
                                43141: 'N-dodecane', 
                                43102: 'TNMTC', 
                                43000: 'TNMHC'}
-def reverse_aqs_compound_codes(aqs_code_dict = {
+def reverse_aqs_compound_to_code(aqs_code_dict = {
     "Ethane": 43202,
     "Ethylene": 43203,
     "Propane": 43204,
@@ -666,7 +666,7 @@ def summarize_blanks(aqs_file):
     # Filter rows where any qualifier column contains 'LB'
     lb_mask = (aqs_df[qualifier_columns] == 'LB').any(axis=1)
     lb_df = aqs_df[lb_mask]
-    aqs_code_to_voc_name = reverse_aqs_compound_codes()
+    aqs_code_to_voc_name = reverse_aqs_compound_to_code()
     # Group by blank_date and collect parameters
     date_series = lb_df.groupby('blank_date')['parameter'].apply(lambda x: [aqs_code_to_voc_name.get(int(p)) for p in x]).reset_index(name = 'failing_blanks')
     # Returns a series with an the index as the datetime object and the value a list of vocs with LB flags on that day
@@ -698,7 +698,7 @@ def summarize_nulls(aqs_file):
                 full_hour_nulls[code].append(date_time)
                 
             elif len(compounds) < 58:
-                aqs_code_to_voc_name = reverse_aqs_compound_codes()
+                aqs_code_to_voc_name = reverse_aqs_compound_to_code()
                 compound_names = [aqs_code_to_voc_name.get(int(p)) for p in compounds if p not in ['43000','43102']]
                 # Make sure all names are strings and handle None values
                 compound_names = [name for name in compound_names if name is not None]
@@ -744,7 +744,7 @@ def summarize_qualifiers(aqs_file):
     mask = ~summary['code'].isin(['MD', 'SQ', 'ND', 'LB'])
     return summary[mask]
 
-#%% Screening checks
+#%% Screening checks, based on reccomended screening checks in PAMS TAD Table 10-1, page 186
 def check_totals(voc_df):
     required_cols = ['DATE/TIME', '43102', '43000']
     for col in required_cols:
@@ -775,7 +775,7 @@ def check_totals(voc_df):
 def check_outliers(voc_df, summary_stats_df):
     # convert compound ID number column names to compound names
     voc_df_names = voc_df.copy()
-    voc_df_names.columns = [voc_df_names.columns[0]] + [aqs_compound_codes_reversed[int(c)].upper() for c in voc_df_names.columns[1:]]
+    voc_df_names.columns = [voc_df_names.columns[0]] + [aqs_code_to_compound[int(c)].upper() for c in voc_df_names.columns[1:]]
     voc_df_names.iloc[:,1:] = voc_df_names.iloc[:,1:].apply(pd.to_numeric)
     summary_stats_df.rename(columns = {'Date':'statistic'},inplace=True)
     stats_clean = summary_stats_df.loc[summary_stats_df['statistic'].isin(["Mean", "Deviation"])].copy()
@@ -798,53 +798,58 @@ def check_outliers(voc_df, summary_stats_df):
     mask_any = flags.drop(columns="DATE/TIME").any(axis=1)
     flags_filtered = flags.loc[mask_any].copy()
     flags_filtered["compounds"] = flags_filtered.drop(columns="DATE/TIME").apply(
-    lambda row: list(row.index[row]), axis=1
+    lambda row: [compound.capitalize() for compound in list(row.index[row])], axis=1
     )
     summary = flags_filtered[["DATE/TIME", "compounds"]].copy()
     summary.insert(loc = 1, column = 'screen_reason', value = 'outliers')
     return summary
 def check_ratios(voc_df, mdls):
-    mdl_number = {aqs_compound_codes[name]: mdl for name, mdl in mdls.items()}
+    mdl_number = {aqs_compound_to_code[name]: mdl for name, mdl in mdls.items()}
     voc_df.iloc[:,1:] = voc_df.iloc[:,1:].apply(pd.to_numeric)
     compound_by_type = sort_by_type(compound_categories = compound_categories)
     alkanes = [str(compound) for compound in compound_by_type['ALKANE']]
     alkenes = [str(compound) for compound in compound_by_type['ALKENE']]
     conditions = [
-        ((voc_df['45201'] > voc_df['45202']) & (voc_df['45201'] > 3*mdl_number[45201]), 'benzene_gt_toluene'),
-        ((voc_df['45201'] > voc_df['43202']) & (voc_df['45201'] > 3*mdl_number[45201]), 'benzene_gt_ethane'),
-        ((voc_df['43203'] > voc_df['43202']) & (voc_df['43203'] > 3*mdl_number[43203]), 'ethylene_gt_ethane'),
-        ((voc_df['43205'] > voc_df['43204']) & (voc_df['43205'] > 3*mdl_number[43205]), 'propylene_gt_propane'),
-        ((voc_df['45204'] > voc_df['45109']) & (voc_df['45204'] > 3*mdl_number[45204]), 'oxylene_gt_mpxylene'),
-        ((voc_df['43263'] < voc_df['43291']) & (voc_df['43291'] > 3*mdl_number[43291]), '23dimethylpentane_gt_2methylhexane'),
-        ((voc_df['43262'] < voc_df['43247']) & (voc_df['43247'] > 3*mdl_number[43247]), '24dimethylpentane_gt_methylcyclopentane'),
-        ((voc_df['43214'] > voc_df['43212']) & (voc_df['43214'] > 3*mdl_number[43214]), 'isobutane_gt_nbutane'),
-        ((voc_df['43230'] > .6*voc_df['43285']) & (voc_df['43230'] > 3*mdl_number[43230]), '3methylpentane_gt_2methylpentane'),
-        ((voc_df['43954'] > voc_df['43141']) & (voc_df['43954'] > 3*mdl_number[43954]), 'nundecane_gt_ndecane'),
-        (~((voc_df['43221'] > voc_df['43220']) & (voc_df['43220'] > voc_df['43242'])) & (voc_df['43221'] > 3*mdl_number[43221]) & (voc_df['43220'] > 3*mdl_number[43220]) & (voc_df['43242'] > 3*mdl_number[43242]), 'not_isopentane_gt_npentane_gt_cyclopentane'),
-        (voc_df[alkenes].sum(axis = 1) > voc_df[alkanes].sum(axis = 1), 'alkenes_gt_alkanes') 
+        ((voc_df['45201'] > voc_df['45202']) & (voc_df['45201'] > 3*mdl_number[45201]), 'benzene_gt_toluene',[45201,45202]),
+        ((voc_df['45201'] > voc_df['43202']) & (voc_df['45201'] > 3*mdl_number[45201]), 'benzene_gt_ethane', [45201,43202]),
+        ((voc_df['43203'] > voc_df['43202']) & (voc_df['43203'] > 3*mdl_number[43203]), 'ethylene_gt_ethane', [43203,43202]),
+        ((voc_df['43205'] > voc_df['43204']) & (voc_df['43205'] > 3*mdl_number[43205]), 'propylene_gt_propane', [43205,43204]),
+        ((voc_df['45204'] > voc_df['45109']) & (voc_df['45204'] > 3*mdl_number[45204]), 'oxylene_gt_mpxylene', [45204,45109]),
+        ((voc_df['43263'] < voc_df['43291']) & (voc_df['43291'] > 3*mdl_number[43291]), '23dimethylpentane_gt_2methylhexane', [43263, 43291]),
+        ((voc_df['43262'] < voc_df['43247']) & (voc_df['43247'] > 3*mdl_number[43247]), '24dimethylpentane_gt_methylcyclopentane', [43262, 43247]),
+        ((voc_df['43214'] > voc_df['43212']) & (voc_df['43214'] > 3*mdl_number[43214]), 'isobutane_gt_nbutane', [43214, 43212]),
+        ((voc_df['43230'] > .6*voc_df['43285']) & (voc_df['43230'] > 3*mdl_number[43230]), '3methylpentane_gt_2methylpentane', [43230,43285]),
+        ((voc_df['43954'] > voc_df['43141']) & (voc_df['43954'] > 3*mdl_number[43954]), 'nundecane_gt_ndecane', [43954, 43141]),
+        (~((voc_df['43221'] > voc_df['43220']) & (voc_df['43220'] > voc_df['43242'])) & (voc_df['43221'] > 3*mdl_number[43221]) & (voc_df['43220'] > 3*mdl_number[43220]) & (voc_df['43242'] > 3*mdl_number[43242]), 
+         'not_isopentane_gt_npentane_gt_cyclopentane', [43221,43220,43242]),
+        (voc_df[alkenes].sum(axis = 1) > voc_df[alkanes].sum(axis = 1), 'alkenes_gt_alkanes', ['alkanes', 'alkenes']) 
          ]
     flagged = []
-    for cond, label in conditions:
+    for cond, label, compounds in conditions:
         subset = voc_df.loc[cond].copy()
         subset['screen_reason'] = label
-        subset['compounds'] = 'ratios'
+        subset['compounds'] = [[aqs_code_to_compound[compound] for compound in compounds if compound in aqs_code_to_compound.keys()]]*len(subset)
         flagged.append(subset)
 
     ratios_check = pd.concat(flagged, ignore_index=True)
-    return ratios_check[['DATE/TIME', 'screen_reason','compounds']].copy()  
+    ratios = ratios_check[['DATE/TIME', 'screen_reason','compounds']].copy()
+    return ratios
 
-def monthly_screening_check(ambient_csv, summary_stats_cvs, mdls):
+def screening_check(ambient_csv, summary_stats_cvs, mdls):
     summary_stats_df = pd.read_csv(summary_stats_cvs, header = 0, nrows = 5)
     voc_df = pd.read_csv(ambient_csv, header =2, parse_dates = [0])
     totals = check_totals(voc_df)
     outliers = check_outliers(voc_df, summary_stats_df)
     ratios = check_ratios(voc_df, mdls)
+    all_checks = [totals, outliers, ratios]
+    all_checks_df = pd.concat(all_checks, ignore_index=True)
+    checks_by_date = all_checks_df.groupby('DATE/TIME').agg(list)
     return ratios
     
 #%% Main
 if __name__ == "__main__":
     compound_by_type = sort_by_type(compound_categories = compound_categories)
-    test = monthly_screening_check(ambient_csv = r"D:\BV\working\validation\preprocessed_data\amount_crosstab_run_[S].csv",
+    test = screening_check(ambient_csv = r"D:\BV\working\validation\preprocessed_data\amount_crosstab_run_[S] - Copy.csv",
                                     summary_stats_cvs = r"D:\BV\working\validation\bv_summary_stats_2024.csv",
                                     mdls = bv_mdls)
 
