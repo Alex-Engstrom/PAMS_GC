@@ -484,7 +484,7 @@ plot_compounds = [
     "2-Methylpentane",
     "3-Methylpentane",
     "Isoprene",
-    #"2-Methyl-1-Pentene",    #Not reported to AQS
+    "2-Methyl-1-Pentene",    #Not reported to AQS
     "1-Hexene"
     ]
 bp_compounds = [
@@ -510,13 +510,13 @@ bp_compounds = [
         "o-Xylene",
         "n-Nonane",
         "Iso-propylbenzene",
-        #"alpha-Pinene",       #Not reported to AQS
+        "alpha-Pinene",       #Not reported to AQS
         "n-Propylbenzene",
         "m-ethyltoluene",
         "p-Ethyltoluene",
         "1,3,5-Tri-m-benzene",
         "o-Ethyltoluene",
-        #"beta-Pinene",     #Not reported to AQS
+        "beta-Pinene",     #Not reported to AQS
         "1,2,4-Tri-m-benzene",
         "n-Decane",
         "1,2,3-Tri-m-benzene",
