@@ -524,7 +524,7 @@ class DataAnalysis:
             #((voc_df[43262] < voc_df[43247]) & (voc_df[43247] > 3*mdl_number[43247]), '24dimethylpentane_gt_methylcyclopentane', [43262, 43247]),
             #((voc_df[43214] > voc_df[43212]) & (voc_df[43214] > 3*mdl_number[43214]), 'isobutane_gt_nbutane', [43214, 43212]),
             ((voc_df[43230] > .6*voc_df[43285]) & (voc_df[43230] > 3*mdl_number[43230]), '3methylpentane_gt_2methylpentane', [43230,43285]),
-            ((voc_df[43954] > voc_df[43238]) & (voc_df[43954] > 3*mdl_number[43954]), 'nundecane_gt_ndecane', [43954, 43141]),
+            ((voc_df[43954] > voc_df[43238]) & (voc_df[43954] > 3*mdl_number[43954]), 'nundecane_gt_ndecane', [43954, 43238]),
             #(~((voc_df[43221] > voc_df[43220]) & (voc_df[43220] > voc_df[43242])) & (voc_df[43221] > 3*mdl_number[43221]) & (voc_df[43220] > 3*mdl_number[43220]) & (voc_df[43242] > 3*mdl_number[43242]), 
             # 'not_isopentane_gt_npentane_gt_cyclopentane', [43221,43220,43242]),
             (voc_df[alkenes].sum(axis = 1) > voc_df[alkanes].sum(axis = 1), 'alkenes_gt_alkanes', ['alkanes', 'alkenes']) 
