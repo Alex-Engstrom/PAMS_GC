@@ -358,7 +358,7 @@ class DataAnalysis:
         self.date = [year, month, day]
         self.folder = self._find_root_dir(data_path = data_path, date = self.date)
         self.filename = self.folder.stem
-        self.samples = self._get_chromatograms(self.folder, 's')
+        self.ambient = self._get_chromatograms(self.folder, 's')
         self.cvs = self._get_chromatograms(self.folder, 'c')
         self.lcs = self._get_chromatograms(self.folder, 'e')
         self.blank = self._get_chromatograms(self.folder, 'b')
@@ -419,7 +419,7 @@ class DataAnalysis:
         # Step 2: instantiate objects based on sample_type
         result_objects = []
         type_map = {
-            "s": Sample,
+            "s": Ambient,
             "b": Blank,
             "c": CVS,
             "q": RTS,
@@ -453,7 +453,7 @@ class DataAnalysis:
         df_columns.extend(list(FrontDetectorChromatogram.plot_vocs.keys()))
         df_columns.extend(list(BackDetectorChromatogram.bp_vocs.keys()))
         chrom_type_guide = {'blank': self.blank,
-                            'sample': self.samples,
+                            'ambient': self.ambient,
                             'cvs': self.cvs,
                             'rts': self.rts,
                             'lcs': self.lcs
@@ -506,7 +506,7 @@ class DataAnalysis:
         return group_by_category
     
     def check_ratios(self, mdls):
-        voc_df, mdl_df = self.generate_data_summary(chrom_type = 'sample', mdls = mdls)                                          
+        voc_df, mdl_df = self.generate_data_summary(chrom_type = 'ambient', mdls = mdls)                                          
         voc_df.iloc[:,1:] = voc_df.iloc[:,1:].apply(pd.to_numeric)
         mdl_number = mdl_df.squeeze()       # convert 1-row DataFrame → Series
         mdl_number.index = mdl_number.index.map(int)  # ensure numeric index (AQS codes)
@@ -636,7 +636,7 @@ class BaseSample:
         self.front = FrontDetectorChromatogram(front_path)
         self.back = BackDetectorChromatogram(back_path)
 # Specific sample types inherit from BaseSample
-class Sample(BaseSample):
+class Ambient(BaseSample):
     pass
 
 class Blank(BaseSample):
