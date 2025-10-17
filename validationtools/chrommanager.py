@@ -514,17 +514,18 @@ class DataAnalysis:
         alkanes = [compound for compound in compound_by_type['ALKANE']]
         alkenes = [compound for compound in compound_by_type['ALKENE']]
         # Commented out screens that do not require qualififcation per TAD table 10-1
+        #Concentrations converted from ppbC to ppb
         conditions = [
-            ((voc_df[45201] > voc_df[45202]) & (voc_df[45201] > 3*mdl_number[45201]), 'benzene_gt_toluene',[45201,45202]),
-            ((voc_df[45201] > voc_df[43202]) & (voc_df[45201] > 3*mdl_number[45201]), 'benzene_gt_ethane', [45201,43202]),
-            ((voc_df[43203] > voc_df[43202]) & (voc_df[43203] > 3*mdl_number[43203]), 'ethylene_gt_ethane', [43203,43202]),
-            ((voc_df[43205] > voc_df[43204]) & (voc_df[43205] > 3*mdl_number[43205]), 'propylene_gt_propane', [43205,43204]),
-            ((voc_df[45204] > voc_df[45109]) & (voc_df[45204] > 3*mdl_number[45204]), 'oxylene_gt_mpxylene', [45204,45109]),
+            ((voc_df[45201]/6 > voc_df[45202]/7) & (voc_df[45201] > 3*mdl_number[45201]), 'benzene_gt_toluene',[45201,45202]),
+            ((voc_df[45201]/6 > voc_df[43202]/2) & (voc_df[45201] > 3*mdl_number[45201]), 'benzene_gt_ethane', [45201,43202]),
+            ((voc_df[43203]/2 > voc_df[43202]/2) & (voc_df[43203] > 3*mdl_number[43203]), 'ethylene_gt_ethane', [43203,43202]),
+            ((voc_df[43205]/3 > voc_df[43204]/3) & (voc_df[43205] > 3*mdl_number[43205]), 'propylene_gt_propane', [43205,43204]),
+            ((voc_df[45204]/8 > voc_df[45109]/8) & (voc_df[45204] > 3*mdl_number[45204]), 'oxylene_gt_mpxylene', [45204,45109]),
             #((voc_df[43263] < voc_df[43291]) & (voc_df[43291] > 3*mdl_number[43291]), '23dimethylpentane_gt_2methylhexane', [43263, 43291]),
             #((voc_df[43262] < voc_df[43247]) & (voc_df[43247] > 3*mdl_number[43247]), '24dimethylpentane_gt_methylcyclopentane', [43262, 43247]),
             #((voc_df[43214] > voc_df[43212]) & (voc_df[43214] > 3*mdl_number[43214]), 'isobutane_gt_nbutane', [43214, 43212]),
-            ((voc_df[43230] > .6*voc_df[43285]) & (voc_df[43230] > 3*mdl_number[43230]), '3methylpentane_gt_2methylpentane', [43230,43285]),
-            ((voc_df[43954] > voc_df[43238]) & (voc_df[43954] > 3*mdl_number[43954]), 'nundecane_gt_ndecane', [43954, 43238]),
+            ((voc_df[43230]/6 > .6*voc_df[43285]/6) & (voc_df[43230] > 3*mdl_number[43230]), '3methylpentane_gt_2methylpentane', [43230,43285]),
+            ((voc_df[43954]/11 > voc_df[43238]/10) & (voc_df[43954] > 3*mdl_number[43954]), 'nundecane_gt_ndecane', [43954, 43238]),
             #(~((voc_df[43221] > voc_df[43220]) & (voc_df[43220] > voc_df[43242])) & (voc_df[43221] > 3*mdl_number[43221]) & (voc_df[43220] > 3*mdl_number[43220]) & (voc_df[43242] > 3*mdl_number[43242]), 
             # 'not_isopentane_gt_npentane_gt_cyclopentane', [43221,43220,43242]),
             (voc_df[alkenes].sum(axis = 1) > voc_df[alkanes].sum(axis = 1), 'alkenes_gt_alkanes', ['alkanes', 'alkenes']) 
@@ -543,7 +544,6 @@ class DataAnalysis:
     def __str__(self):
         return f"{self.folder}"
         
-ddd
     
 class PAMSSite(DataAnalysis):
     def __init__(self):
