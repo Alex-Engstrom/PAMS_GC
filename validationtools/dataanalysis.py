@@ -743,7 +743,7 @@ def summarize_qualifiers(aqs_file):
     )
     mask = ~summary['code'].isin(['MD', 'SQ', 'ND', 'LB'])
     return summary[mask]
-
+    
 #%% Screening checks, based on reccomended screening checks in PAMS TAD Table 10-1, page 186
 def check_totals(voc_df):
     required_cols = ['DATE/TIME', '43102', '43000']
@@ -848,10 +848,7 @@ def screening_check(ambient_csv, summary_stats_cvs, mdls):
     
 #%% Main
 if __name__ == "__main__":
-    compound_by_type = sort_by_type(compound_categories = compound_categories)
-    test = screening_check(ambient_csv = r"D:\BV\working\validation\preprocessed_data\amount_crosstab_run_[S] - Copy.csv",
-                                    summary_stats_cvs = r"D:\BV\working\validation\bv_summary_stats_2024.csv",
-                                    mdls = bv_mdls)
+    pass
 
 
     
